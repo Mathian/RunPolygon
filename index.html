@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f0f14" />
+  <title>RunZone</title>
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- ===== MAP TAB ===== -->
+  <div id="tab-map" class="tab-panel active">
+
+    <!-- Stats overlay (top) -->
+    <div id="stats-bar" class="stats-bar hidden">
+      <div class="stat-item">
+        <span class="stat-value" id="stat-speed">0.0</span>
+        <span class="stat-label">км/ч</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-distance">0.00</span>
+        <span class="stat-label">км</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-time">00:00</span>
+        <span class="stat-label">время</span>
+      </div>
+    </div>
+
+    <!-- Closure indicator -->
+    <div id="closure-hint" class="closure-hint hidden">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      Замкнуть маршрут
+    </div>
+
+    <!-- Leaflet map container -->
+    <div id="map"></div>
+
+    <!-- Start / Stop button -->
+    <div class="map-controls">
+      <button id="btn-track" class="btn-track" onclick="App.toggleTracking()">
+        <span id="btn-track-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+        </span>
+        <span id="btn-track-label">Начать пробежку</span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ===== RUNS TAB ===== -->
+  <div id="tab-runs" class="tab-panel">
+    <div class="panel-header">
+      <h2>Мои пробежки</h2>
+      <div id="runs-summary" class="runs-summary hidden">
+        <div class="summary-item">
+          <span class="summary-value" id="total-runs">0</span>
+          <span class="summary-label">пробежек</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-value" id="total-area-display">0</span>
+          <span class="summary-label">м² захвачено</span>
+        </div>
+      </div>
+    </div>
+    <div id="runs-list" class="runs-list">
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+        <p>Ещё нет пробежек.<br/>Запусти первый трекинг!</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PROFILE TAB ===== -->
+  <div id="tab-profile" class="tab-panel">
+    <div class="panel-header">
+      <h2>Профиль</h2>
+    </div>
+
+    <!-- User card -->
+    <div class="profile-card">
+      <div class="profile-avatar-wrap">
+        <img id="profile-avatar" class="profile-avatar" src="https://ui-avatars.com/api/?name=RZ&background=6c63ff&color=fff&size=128" alt="avatar" />
+        <div class="profile-avatar-ring"></div>
+      </div>
+      <div class="profile-info">
+        <div id="profile-name" class="profile-name">Игрок</div>
+        <div class="profile-stats-row">
+          <div class="profile-stat">
+            <span id="prof-area" class="profile-stat-val">0</span>
+            <span class="profile-stat-lbl">м²</span>
+          </div>
+          <div class="profile-stat">
+            <span id="prof-runs" class="profile-stat-val">0</span>
+            <span class="profile-stat-lbl">забегов</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Color picker -->
+    <div class="section-title">Цвет территории</div>
+    <div class="color-picker" id="color-picker">
+      <button class="color-swatch active" data-color="#6c63ff" style="background:#6c63ff"></button>
+      <button class="color-swatch" data-color="#ff6b6b" style="background:#ff6b6b"></button>
+      <button class="color-swatch" data-color="#4ecdc4" style="background:#4ecdc4"></button>
+      <button class="color-swatch" data-color="#45b7d1" style="background:#45b7d1"></button>
+      <button class="color-swatch" data-color="#f9ca24" style="background:#f9ca24"></button>
+      <button class="color-swatch" data-color="#fd9644" style="background:#fd9644"></button>
+      <button class="color-swatch" data-color="#a29bfe" style="background:#a29bfe"></button>
+      <button class="color-swatch" data-color="#55efc4" style="background:#55efc4"></button>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="section-title">Лидерборд</div>
+    <div id="leaderboard" class="leaderboard-list"></div>
+  </div>
+
+  <!-- ===== BOTTOM NAV ===== -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="nav-btn active" data-tab="map" onclick="App.switchTab('map')">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="1,6 1,22 8,18 16,22 23,18 23,2 16,6 8,2"/>
+        <line x1="8" y1="2" x2="8" y2="18"/>
+        <line x1="16" y1="6" x2="16" y2="22"/>
+      </svg>
+      <span>Карта</span>
+    </button>
+    <button class="nav-btn" data-tab="runs" onclick="App.switchTab('runs')">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/>
+      </svg>
+      <span>Забеги</span>
+    </button>
+    <button class="nav-btn" data-tab="profile" onclick="App.switchTab('profile')">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20,21v-2a4,4 0 0,0-4-4H8a4,4,0,0,0-4,4v2"/>
+        <circle cx="12" cy="7" r="4"/>
+      </svg>
+      <span>Профиль</span>
+    </button>
+  </nav>
+
+  <!-- Territory info popup -->
+  <div id="territory-popup" class="territory-popup hidden">
+    <div class="popup-inner">
+      <button class="popup-close" onclick="MapManager.closePopup()">✕</button>
+      <img id="popup-avatar" class="popup-avatar" src="" alt="" />
+      <div id="popup-name" class="popup-name"></div>
+      <div class="popup-stats">
+        <div class="popup-stat">
+          <span id="popup-area" class="popup-stat-val"></span>
+          <span class="popup-stat-lbl">м² территории</span>
+        </div>
+        <div class="popup-stat">
+          <span id="popup-runs" class="popup-stat-val"></span>
+          <span class="popup-stat-lbl">забегов</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notification -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Turf.js for polygon operations -->
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <!-- App scripts (order matters) -->
+  <script src="js/storage.js"></script>
+  <script src="js/territory.js"></script>
+  <script src="js/tracking.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>
