@@ -20,15 +20,14 @@ const MapManager = (() => {
       attributionControl: false,
     });
 
-    // Dark tile layer (Carto Dark Matter)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd',
+    // Dark tile layer (OpenFreeMap – free, no limits)
+    L.maplibreGL({
+      style: 'https://tiles.openfreemap.org/styles/dark',
     }).addTo(map);
 
     // Attribution (small)
     L.control.attribution({ position: 'bottomright', prefix: '' })
-      .addAttribution('© <a href="https://carto.com">CARTO</a>')
+      .addAttribution('© <a href="https://openfreemap.org">OpenFreeMap</a> © <a href="https://www.openstreetmap.org/copyright">OSM</a>')
       .addTo(map);
 
     // Zoom control top-right
@@ -191,7 +190,6 @@ const MapManager = (() => {
   // ---- Format helpers ----
   function formatArea(m2) {
     if (m2 >= 1000000) return (m2 / 1000000).toFixed(2) + ' км²';
-    if (m2 >= 10000)   return Math.round(m2 / 10000) + ' га';
     return Math.round(m2).toLocaleString('ru') + ' м²';
   }
 

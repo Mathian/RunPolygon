@@ -304,7 +304,6 @@ const App = (() => {
   function formatArea(m2) {
     if (!m2) return '0 м²';
     if (m2 >= 1000000) return (m2 / 1000000).toFixed(2) + ' км²';
-    if (m2 >= 10000)   return Math.round(m2 / 10000) + ' га';
     return Math.round(m2).toLocaleString('ru') + ' м²';
   }
 
