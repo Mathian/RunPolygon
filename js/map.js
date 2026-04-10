@@ -200,5 +200,6 @@ const MapManager = (() => {
     startRoute, addRoutePoint, clearRoute,
     renderAllTerritories, renderTerritory, removeTerritory,
     showTerritoryPopup, closePopup, fitToTerritory,
+    getMap,
   };
 })();

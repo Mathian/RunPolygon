@@ -1,17 +1,16 @@
 /**
  * app.js – Application entry point
- * Initialises Telegram WebApp, manages state, tab routing
+ * Handles Firebase auth, uid resolution, consent screen, and all UI logic.
  */
 const App = (() => {
 
-  // ---- Telegram WebApp ----
   const tg = window.Telegram?.WebApp;
-  let currentTab   = 'map';
-  let isTracking   = false;
-  let toastTimer   = null;
+  let currentTab = 'map';
+  let isTracking = false;
+  let toastTimer = null;
 
-  // ---- Init ----
-  function init() {
+  // ─── Entry point (async) ──────────────────────────────────────────
+  async function init() {
     if (tg) {
       tg.ready();
       tg.expand();
@@ -19,103 +18,147 @@ const App = (() => {
       tg.setBackgroundColor('#0f0f14');
     }
 
-    // Load or create user
-    ensureUser();
+    // Resolve UID: URL param wins, then localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlUid    = urlParams.get('uid');
+    if (urlUid) {
+      localStorage.setItem('rz_uid', urlUid);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    const uid = urlUid || localStorage.getItem('rz_uid');
 
-    // Request GPS & init map
-    requestLocationAndInit();
+    if (!uid) {
+      _loadingError('Откройте приложение через Telegram-бот');
+      return;
+    }
 
-    // Render profile tab
+    try {
+      await FirebaseDB.init();
+      await Storage.load(uid);
+    } catch (e) {
+      console.error('[App.init] Firebase error:', e);
+      _loadingError('Ошибка подключения. Попробуйте ещё раз.');
+      return;
+    }
+
+    if (!Storage.getUser()) {
+      _loadingError('Аккаунт не найден. Воспользуйтесь ботом для регистрации.');
+      return;
+    }
+
+    // Check consent
+    let fbUser = null;
+    try { fbUser = await FirebaseDB.getUser(uid); } catch { /* ignore */ }
+
+    document.getElementById('loading-screen').classList.add('hidden');
+
+    if (!fbUser?.consentGiven) {
+      _showConsentScreen(uid);
+    } else {
+      _startApp();
+    }
+  }
+
+  function _loadingError(msg) {
+    document.getElementById('loading-screen').innerHTML = `
+      <div class="loading-content">
+        <div class="loading-icon" style="color:var(--accent)">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="loading-msg">${msg}</div>
+      </div>`;
+  }
+
+  function _showConsentScreen(uid) {
+    document.getElementById('consent-screen').classList.remove('hidden');
+    document.getElementById('btn-consent-accept').onclick = async () => {
+      const btn = document.getElementById('btn-consent-accept');
+      btn.disabled = true;
+      try {
+        await FirebaseDB.setConsent(uid);
+        document.getElementById('consent-screen').classList.add('hidden');
+        _startApp();
+      } catch (e) {
+        console.error('[consent]', e);
+        btn.disabled = false;
+      }
+    };
+  }
+
+  function _startApp() {
+    _setupColorPicker();
+    _requestLocationAndInit();
     renderProfile();
+  }
 
-    // Color picker
+  // ─── Color picker ─────────────────────────────────────────────────
+  function _setupColorPicker() {
+    const user = Storage.getUser();
+    if (!user) return;
     document.querySelectorAll('.color-swatch').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.color === user.color);
       btn.addEventListener('click', () => {
         document.querySelectorAll('.color-swatch').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const user = Storage.getUser();
-        user.color = btn.dataset.color;
-        Storage.saveUser(user);
-        // Update avatar ring
-        document.querySelector('.profile-avatar-ring').style.borderColor = user.color;
+        const u   = Storage.getUser();
+        u.color   = btn.dataset.color;
+        Storage.saveUser(u);
+        document.querySelector('.profile-avatar-ring').style.borderColor = u.color;
         showToast('Цвет территории обновлён');
-        // Re-render own territories with new color
-        updateOwnTerritoryColor(user.color);
+        _updateOwnTerritoryColor(u.color);
       });
     });
   }
 
-  // ---- User setup ----
-  function ensureUser() {
-    let user = Storage.getUser();
-    if (!user) {
-      const tgUser = tg?.initDataUnsafe?.user;
-      user = {
-        id:       tgUser?.id ? String(tgUser.id) : 'user_' + Date.now(),
-        username: tgUser?.first_name || tgUser?.username || 'Игрок',
-        avatar:   tgUser?.photo_url  || null,
-        color:    '#6c63ff',
-      };
-      // Fallback avatar via UI Avatars
-      if (!user.avatar) {
-        user.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username[0])}&background=6c63ff&color=fff&size=128`;
-      }
-      Storage.saveUser(user);
-    }
-    return user;
-  }
-
-  // ---- GPS + Map init ----
-  function requestLocationAndInit() {
+  // ─── GPS + Map init ───────────────────────────────────────────────
+  function _requestLocationAndInit() {
     if (!('geolocation' in navigator)) {
       MapManager.init();
-      loadMockTerritories(55.751244, 37.618423);
+      _loadTerritories(55.751244, 37.618423);
       return;
     }
-
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
         MapManager.init(lat, lng);
         MapManager.updateUserMarker(lat, lng);
-        loadMockTerritories(lat, lng);
+        await _loadTerritories(lat, lng);
       },
-      () => {
-        // Permission denied or error – use Moscow as default
+      async () => {
         MapManager.init(55.751244, 37.618423);
-        loadMockTerritories(55.751244, 37.618423);
+        await _loadTerritories(55.751244, 37.618423);
       },
       { enableHighAccuracy: false, timeout: 5000 }
     );
   }
 
-  function loadMockTerritories(lat, lng) {
-    Storage.generateMockTerritories(lat, lng);
+  async function _loadTerritories(lat, lng) {
+    await Storage.generateMockTerritories(lat, lng);
     MapManager.renderAllTerritories();
   }
 
-  // ---- Tab switching ----
+  // ─── Tab switching ────────────────────────────────────────────────
   function switchTab(tab) {
     if (tab === currentTab) return;
     currentTab = tab;
-
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-
     document.getElementById('tab-' + tab).classList.add('active');
     document.querySelector(`.nav-btn[data-tab="${tab}"]`).classList.add('active');
-
     if (tab === 'map') {
-      // Force Leaflet redraw after panel becomes visible
-      setTimeout(() => MapManager.getMap && MapManager.getMap()?.invalidateSize(), 50);
+      setTimeout(() => MapManager.getMap?.()?.invalidateSize(), 50);
     } else if (tab === 'runs') {
-      renderRuns();
+      _renderRuns();
     } else if (tab === 'profile') {
       renderProfile();
     }
   }
 
-  // ---- Start / Stop tracking (called from button) ----
+  // ─── Tracking ─────────────────────────────────────────────────────
   function toggleTracking() {
     if (isTracking) stopTracking(true);
     else startTracking();
@@ -129,7 +172,6 @@ const App = (() => {
     btn.classList.add('running');
     label.textContent = 'Завершить';
     icon.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
-
     MapManager.startRoute();
     Tracker.start();
     showToast('Трекинг запущен');
@@ -143,34 +185,28 @@ const App = (() => {
     btn.classList.remove('running');
     label.textContent = 'Начать пробежку';
     icon.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
-
     const result = Tracker.stop();
     document.getElementById('stats-bar').classList.add('hidden');
     document.getElementById('closure-hint').classList.add('hidden');
-
     if (result && result.points.length >= 10) {
-      finishRun(result);
+      _finishRun(result);
     } else {
       MapManager.clearRoute();
       if (manual) showToast('Маршрут слишком короткий', 'error');
     }
   }
 
-  // ---- Closure confirm (called when user taps the closure hint) ----
   function closureConfirm() {
     if (!isTracking) return;
     stopTracking(true);
   }
 
-  // ---- Finish run & process territory ----
-  function finishRun(result) {
+  // ─── Finish run ───────────────────────────────────────────────────
+  function _finishRun(result) {
     const { points, totalDistance, duration } = result;
-    const user = Storage.getUser();
-
-    // Attempt to create territory
+    const user      = Storage.getUser();
     const terrResult = TerritoryManager.createTerritory(points, user);
 
-    // Save run record
     const run = {
       id:          'run_' + Date.now(),
       userId:      user.id,
@@ -191,20 +227,18 @@ const App = (() => {
       const captured = capturedFrom.length > 0
         ? ` Захвачено у ${capturedFrom.length} игрок(а)!`
         : '';
-      showToast(`Территория ${formatArea(territory.area)} захвачена!${captured}`, 'success');
+      showToast(`Территория ${_formatArea(territory.area)} захвачена!${captured}`, 'success');
       MapManager.fitToTerritory(territory);
     } else {
       showToast('Маршрут не замкнулся — попробуй снова', 'error');
     }
-
-    // Update profile counters
     renderProfile();
   }
 
-  // ---- Render runs list ----
-  function renderRuns() {
-    const runs = Storage.getRuns();
-    const list = document.getElementById('runs-list');
+  // ─── Runs tab ─────────────────────────────────────────────────────
+  function _renderRuns() {
+    const runs    = Storage.getRuns();
+    const list    = document.getElementById('runs-list');
     const summary = document.getElementById('runs-summary');
 
     if (runs.length === 0) {
@@ -219,13 +253,13 @@ const App = (() => {
 
     const totalArea = runs.reduce((s, r) => s + (r.area || 0), 0);
     document.getElementById('total-runs').textContent = runs.length;
-    document.getElementById('total-area-display').textContent = formatArea(totalArea);
+    document.getElementById('total-area-display').textContent = _formatArea(totalArea);
     summary.classList.remove('hidden');
 
     const user = Storage.getUser();
     list.innerHTML = runs.map(run => {
       const date = new Date(run.date).toLocaleDateString('ru', { day: 'numeric', month: 'short' });
-      const time = formatDuration(run.duration);
+      const time = _formatDuration(run.duration);
       const dist = (run.distance / 1000).toFixed(2);
       return `
         <div class="run-card">
@@ -233,81 +267,69 @@ const App = (() => {
           <div class="run-card-info">
             <div class="run-card-date">${date}</div>
             <div class="run-card-title">${dist} км · ${time}</div>
-            ${run.area ? `<div class="run-card-sub">+${formatArea(run.area)} захвачено</div>` : ''}
+            ${run.area ? `<div class="run-card-sub">+${_formatArea(run.area)} захвачено</div>` : ''}
           </div>
-          ${run.area ? `<div class="run-card-area">${formatArea(run.area)}</div>` : ''}
+          ${run.area ? `<div class="run-card-area">${_formatArea(run.area)}</div>` : ''}
         </div>`;
     }).join('');
   }
 
-  // ---- Render profile ----
+  // ─── Profile tab ──────────────────────────────────────────────────
   function renderProfile() {
     const user = Storage.getUser();
     if (!user) return;
-
     document.getElementById('profile-name').textContent = user.username;
-    const avatar = document.getElementById('profile-avatar');
-    if (user.avatar) avatar.src = user.avatar;
+    const avatarEl = document.getElementById('profile-avatar');
+    if (user.avatar) avatarEl.src = user.avatar;
     document.querySelector('.profile-avatar-ring').style.borderColor = user.color;
-
-    const runs  = Storage.getRuns();
-    const area  = TerritoryManager.totalOwnedArea();
-    document.getElementById('prof-area').textContent = formatArea(area);
-    document.getElementById('prof-runs').textContent = runs.length;
-
-    // Highlight active color swatch
+    const area = TerritoryManager.totalOwnedArea();
+    document.getElementById('prof-area').textContent = _formatArea(area);
+    document.getElementById('prof-runs').textContent  = Storage.getRuns().length;
     document.querySelectorAll('.color-swatch').forEach(b => {
       b.classList.toggle('active', b.dataset.color === user.color);
     });
-
-    // Leaderboard
-    renderLeaderboard();
+    _renderLeaderboard();
   }
 
-  function renderLeaderboard() {
+  function _renderLeaderboard() {
     const entries = Storage.getLeaderboard();
-    const lb = document.getElementById('leaderboard');
-    const ranks = ['gold', 'silver', 'bronze'];
-    lb.innerHTML = entries.map((e, i) => {
-      const rankClass = ranks[i] || '';
-      const rankNum   = i + 1;
-      return `
-        <div class="lb-item ${e.isMe ? 'me' : ''}">
-          <span class="lb-rank ${rankClass}">${rankNum}</span>
-          <img class="lb-avatar" src="${e.avatar}"
-               onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent((e.username||'?')[0])}&background=${(e.color||'6c63ff').replace('#','')}&color=fff&size=64'"
-               alt="${e.username}" />
-          <span class="lb-name">${e.username}${e.isMe ? ' (Вы)' : ''}</span>
-          <span class="lb-area">${formatArea(e.area)}</span>
-        </div>`;
-    }).join('');
+    const lb      = document.getElementById('leaderboard');
+    const ranks   = ['gold', 'silver', 'bronze'];
+    lb.innerHTML = entries.map((e, i) => `
+      <div class="lb-item ${e.isMe ? 'me' : ''}">
+        <span class="lb-rank ${ranks[i] || ''}">${i + 1}</span>
+        <img class="lb-avatar"
+             src="${e.avatar || ''}"
+             onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent((e.username||'?')[0])}&background=${(e.color||'6c63ff').replace('#','')}&color=fff&size=64'"
+             alt="${e.username}" />
+        <span class="lb-name">${e.username}${e.isMe ? ' (Вы)' : ''}</span>
+        <span class="lb-area">${_formatArea(e.area)}</span>
+      </div>`).join('');
   }
 
-  // ---- Update own territory color ----
-  function updateOwnTerritoryColor(newColor) {
-    const user = Storage.getUser();
+  function _updateOwnTerritoryColor(newColor) {
     const territories = Storage.getTerritories().map(t => ({ ...t, color: newColor }));
     Storage.saveTerritories(territories);
     MapManager.renderAllTerritories();
   }
 
-  // ---- Toast ----
+  // ─── Toast ────────────────────────────────────────────────────────
   function showToast(message, type = '') {
     clearTimeout(toastTimer);
     const toast = document.getElementById('toast');
     toast.textContent = message;
-    toast.className = 'toast' + (type ? ' ' + type : '');
+    toast.className   = 'toast' + (type ? ' ' + type : '');
     toastTimer = setTimeout(() => toast.classList.add('hidden'), 3000);
   }
 
-  // ---- Helpers ----
-  function formatArea(m2) {
+  // ─── Helpers ──────────────────────────────────────────────────────
+  function _formatArea(m2) {
     if (!m2) return '0 м²';
     if (m2 >= 1000000) return (m2 / 1000000).toFixed(2) + ' км²';
     return Math.round(m2).toLocaleString('ru') + ' м²';
   }
 
-  function formatDuration(sec) {
+  function _formatDuration(sec) {
     if (!sec) return '0:00';
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
@@ -316,10 +338,6 @@ const App = (() => {
     return `${m}:${String(s).padStart(2,'0')}`;
   }
 
-  // ---- Expose MapManager.getMap for Leaflet invalidateSize ----
-  // (MapManager.getMap returns the Leaflet map instance)
-
-  // ---- Public API ----
   return {
     init,
     switchTab,
@@ -328,8 +346,8 @@ const App = (() => {
     stopTracking,
     closureConfirm,
     showToast,
+    renderProfile,
   };
 })();
 
-// Boot
 document.addEventListener('DOMContentLoaded', App.init);

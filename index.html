@@ -20,6 +20,53 @@
 </head>
 <body>
 
+  <!-- ===== LOADING SCREEN ===== -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-content">
+      <div class="loading-icon">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M13 4a2 2 0 1 0-2 2"/>
+          <path d="M12 20v-8l-4-4"/>
+          <path d="M12 12l4 2"/>
+          <circle cx="7" cy="18" r="2"/>
+          <circle cx="17" cy="18" r="2"/>
+        </svg>
+      </div>
+      <div class="loading-title">RunZone</div>
+      <div class="loading-spinner"></div>
+    </div>
+  </div>
+
+  <!-- ===== CONSENT SCREEN ===== -->
+  <div id="consent-screen" class="consent-screen hidden">
+    <div class="consent-inner">
+      <div class="consent-icon">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <polyline points="9,12 11,14 15,10"/>
+        </svg>
+      </div>
+      <h2 class="consent-title">Добро пожаловать<br/>в RunZone</h2>
+      <p class="consent-text">
+        Перед началом использования необходимо принять
+        <strong>Пользовательское соглашение</strong>
+        и <strong>Политику конфиденциальности</strong>.
+      </p>
+      <ul class="consent-list">
+        <li>Приложение собирает GPS-данные для записи маршрутов</li>
+        <li>Ваши данные хранятся в защищённом облаке Firebase</li>
+        <li>Мы не передаём данные третьим лицам</li>
+        <li>Вы можете удалить аккаунт через бота в любой момент</li>
+      </ul>
+      <button id="btn-consent-accept" class="btn-consent">
+        Принять и начать
+      </button>
+      <p class="consent-note">
+        Нажимая кнопку, вы соглашаетесь с условиями использования
+      </p>
+    </div>
+  </div>
+
   <!-- ===== MAP TAB ===== -->
   <div id="tab-map" class="tab-panel active">
 
@@ -187,7 +234,13 @@
   <!-- Turf.js for polygon operations -->
   <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
+  <!-- Firebase 10.x compat SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
+
   <!-- App scripts (order matters) -->
+  <script src="js/firebase.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/territory.js"></script>
   <script src="js/tracking.js"></script>
